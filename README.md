@@ -1,2 +1,0 @@
-# Andorra-RP
-Andorra RP
