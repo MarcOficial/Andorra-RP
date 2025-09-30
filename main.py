@@ -7,10 +7,46 @@ from discord.ui import View, Button, Select, Modal, TextInput  # <-- Añadido Mo
 from discord.ext import commands
 import os, json, random, string, asyncio, datetime, time
 
-# Config
-TOKEN = os.getenv("DISCORD_TOKEN")  # Replit Secrets: DISCORD_TOKEN
-STAFF_ROLE_ID = 1405162292722532482
-ECONOMIA_ROLE_ID = 1415040769697382561
+# =====================
+# CONFIGURACIÓN CENTRALIZADA
+# =====================
+class Config:
+    """Configuración centralizada del bot"""
+    # Token del bot
+    TOKEN = os.getenv("DISCORD_TOKEN")
+    
+    # Roles importantes
+    STAFF_ROLE_ID = 1419296399547174934
+    ECONOMIA_ROLE_ID = 1415040769697382561
+    ROL_POLICIA_ID = 1404502808547430451
+    ROL_VERIFICADO = 1416109554629873704
+    
+    # Canales importantes
+    CANAL_VERIFICACIONES = 1415651594464137246
+    CANAL_SOLICITUDES = 1415652632231677982
+    CANAL_LOGS = None  # Se configurará dinámicamente
+    
+    # Configuración de economía
+    SALDO_INICIAL_TARJETA = 1200
+    SALDO_INICIAL_EFECTIVO = 0
+    
+    # Colores para embeds
+    COLOR_EXITO = discord.Color.green()
+    COLOR_ERROR = discord.Color.red()
+    COLOR_ADVERTENCIA = discord.Color.orange()
+    COLOR_INFO = discord.Color.blue()
+    COLOR_ECONOMICO = discord.Color.gold()
+    
+    # Mensajes del sistema
+    FOOTER_BANCARIO = "Sistema Bancario • Valencia RP ESP"
+    FOOTER_ADMINISTRATIVO = "Sistema Administrativo • Valencia RP ESP"
+    FOOTER_ERRORES = "Sistema de Errores • Valencia RP ESP"
+    FOOTER_INVENTARIO = "Sistema de Inventario • Valencia RP ESP"
+    FOOTER_TIENDA = "Sistema de Tienda • Valencia RP ESP"
+    FOOTER_POLICIAL = "Sistema Policial • Valencia RP ESP"
+    
+# Instancia global de configuración
+config = Config()
 
 # Bot con intents completos
 intents = discord.Intents.all()
@@ -77,24 +113,227 @@ def generar_dni():
 def generar_codigo_multa():
     return "M" + "".join(random.choices(string.digits, k=10))
 
-def es_staff(member):
-    try:
-        return any(r.id == STAFF_ROLE_ID for r in member.roles)
-    except Exception:
+# =====================
+# UTILIDADES MEJORADAS
+# =====================
+def es_staff(user_or_member) -> bool:
+    """Verifica si el usuario tiene permisos de staff"""
+    if not user_or_member:
         return False
+    
+    # Si es un User, no puede tener roles
+    if isinstance(user_or_member, discord.User):
+        return False
+    
+    # Si es un Member, verificar roles
+    if isinstance(user_or_member, discord.Member):
+        try:
+            return any(r.id == config.STAFF_ROLE_ID for r in user_or_member.roles)
+        except (AttributeError, TypeError):
+            return False
+    
+    return False
 
-def es_economia(member):
-    try:
-        return any(r.id == ECONOMIA_ROLE_ID for r in member.roles)
-    except Exception:
+def es_economia(user_or_member) -> bool:
+    """Verifica si el usuario tiene permisos de economía"""
+    if not user_or_member:
         return False
+    
+    # Si es un User, no puede tener roles
+    if isinstance(user_or_member, discord.User):
+        return False
+    
+    # Si es un Member, verificar roles
+    if isinstance(user_or_member, discord.Member):
+        try:
+            return any(r.id == config.ECONOMIA_ROLE_ID for r in user_or_member.roles)
+        except (AttributeError, TypeError):
+            return False
+    
+    return False
+
+def es_policia(user_or_member) -> bool:
+    """Verifica si el usuario es policía"""
+    if not user_or_member:
+        return False
+    
+    if isinstance(user_or_member, discord.User):
+        return False
+    
+    if isinstance(user_or_member, discord.Member):
+        try:
+            return any(r.id == config.ROL_POLICIA_ID for r in user_or_member.roles)
+        except (AttributeError, TypeError):
+            return False
+    
+    return False
+
+def obtener_member_seguro(interaction: discord.Interaction, usuario: discord.User = None) -> discord.Member:
+    """Obtiene un Member de forma segura desde un User o Interaction"""
+    if usuario is None:
+        usuario = interaction.user
+    
+    # Si ya es Member, devolverlo
+    if isinstance(usuario, discord.Member):
+        return usuario
+    
+    # Si es User, intentar obtener Member desde el guild
+    if isinstance(usuario, discord.User) and interaction.guild:
+        member = interaction.guild.get_member(usuario.id)
+        if member:
+            return member
+    
+    return None
+
+def crear_embed_error(titulo: str, descripcion: str, footer: str = None) -> discord.Embed:
+    """Crea un embed de error estandarizado"""
+    embed = discord.Embed(
+        title=f"❌ {titulo}",
+        description=descripcion,
+        color=config.COLOR_ERROR
+    )
+    if footer:
+        embed.set_footer(text=footer)
+    return embed
+
+def crear_embed_exito(titulo: str, descripcion: str, footer: str = None) -> discord.Embed:
+    """Crea un embed de éxito estandarizado"""
+    embed = discord.Embed(
+        title=f"✅ {titulo}",
+        description=descripcion,
+        color=config.COLOR_EXITO
+    )
+    if footer:
+        embed.set_footer(text=footer)
+    return embed
+
+def crear_embed_info(titulo: str, descripcion: str, footer: str = None) -> discord.Embed:
+    """Crea un embed informativo estandarizado"""
+    embed = discord.Embed(
+        title=f"ℹ️ {titulo}",
+        description=descripcion,
+        color=config.COLOR_INFO
+    )
+    if footer:
+        embed.set_footer(text=footer)
+    return embed
+
+# =====================
+# MANEJO DE ERRORES MEJORADO
+# =====================
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    """Maneja errores de comandos de aplicación de forma global y profesional."""
+    import logging
+    import traceback
+    
+    # Configurar logging si no está configurado
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    
+    # Log del error para depuración
+    comando = interaction.command.name if interaction.command else "Desconocido"
+    logging.error(f"Error en comando '{comando}': {error}")
+    
+    # Determinar el mensaje de error apropiado
+    if isinstance(error, app_commands.CommandInvokeError):
+        original_error = error.original
+        
+        if isinstance(original_error, discord.NotFound):
+            if "Unknown interaction" in str(original_error):
+                # Interacción ya respondida o expirada
+                logging.warning(f"Interacción expirada/duplicada en comando '{comando}'")
+                return
+            else:
+                error_msg = "🔍 **Recurso no encontrado**\nEl elemento solicitado no existe o ha sido eliminado."
+        
+        elif isinstance(original_error, discord.Forbidden):
+            error_msg = "🚫 **Sin permisos**\nNo tengo los permisos necesarios para ejecutar esta acción."
+        
+        elif isinstance(original_error, discord.HTTPException):
+            error_msg = "🌐 **Error de conexión**\nProblemas de comunicación con Discord. Inténtalo nuevamente."
+        
+        elif isinstance(original_error, (ValueError, TypeError)):
+            error_msg = "📝 **Datos inválidos**\nLos datos proporcionados no son válidos. Verifica tu entrada."
+        
+        else:
+            # Error genérico con más detalles para staff
+            error_msg = "⚙️ **Error interno del sistema**\nSe ha producido un error inesperado."
+            logging.error(f"Error no manejado en '{comando}': {traceback.format_exc()}")
+    
+    elif isinstance(error, app_commands.CommandOnCooldown):
+        tiempo = f"{error.retry_after:.1f}"
+        error_msg = f"⏰ **Comando en cooldown**\nEspera {tiempo} segundos antes de usar este comando nuevamente."
+    
+    elif isinstance(error, app_commands.MissingPermissions):
+        permisos = ", ".join([p.replace('_', ' ').title() for p in error.missing_permissions])
+        error_msg = f"🔐 **Permisos insuficientes**\nNecesitas los siguientes permisos: {permisos}"
+    
+    elif isinstance(error, app_commands.BotMissingPermissions):
+        permisos = ", ".join([p.replace('_', ' ').title() for p in error.missing_permissions])
+        error_msg = f"🤖 **Bot sin permisos**\nEl bot necesita los siguientes permisos: {permisos}"
+    
+    elif isinstance(error, app_commands.CommandNotFound):
+        error_msg = "❓ **Comando no encontrado**\nEste comando no existe o ha sido deshabilitado."
+    
+    else:
+        error_msg = "❗ **Error desconocido**\nSe ha producido un error inesperado. Contacta al staff si persiste."
+        logging.error(f"Error no categorizado en '{comando}': {error}")
+    
+    # Intentar enviar la respuesta de error
+    try:
+        embed = crear_embed_error(
+            "Error en el comando",
+            error_msg,
+            config.FOOTER_ERRORES
+        )
+        
+        # Agregar información adicional para staff
+        if interaction.user and es_staff(interaction.user):
+            embed.add_field(
+                name="🔧 Info para Staff",
+                value=f"**Comando:** `{comando}`\n**Error:** `{type(error).__name__}`",
+                inline=False
+            )
+        
+        # Enviar respuesta
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+    except Exception as e:
+        # Último recurso: mensaje simple
+        logging.error(f"No se pudo enviar embed de error: {e}")
+        try:
+            mensaje_simple = f"❌ Error en el comando. Contacta al staff si persiste."
+            if not interaction.response.is_done():
+                await interaction.response.send_message(mensaje_simple, ephemeral=True)
+            else:
+                await interaction.followup.send(mensaje_simple, ephemeral=True)
+        except:
+            logging.error("No se pudo enviar ningún tipo de respuesta de error")
+
+from keep_alive import keep_alive  # 👈 añade esto arriba de tu código
+
+keep_alive()  # 👈 ponlo antes de bot.run()
+
 
 # On ready
 @bot.event
 async def on_ready():
-    await bot.change_presence(activity=discord.Game(name="Andorra RP ESP V2"))
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    
+    await bot.change_presence(
+        activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name="Valencia RP ESP V2 | /ayuda para comandos"
+        )
+    )
     await tree.sync()
     print(f"✅ Bot listo como {bot.user} ({len(bot.guilds)} guilds)")
+    print(f"✅ Comandos sincronizados: {len(tree.get_commands())}")
     bot.loop.create_task(pagos_prestamos_diarios())
 
 # ----------------------
@@ -104,57 +343,163 @@ async def on_ready():
 # ----------------------
 # --- COMANDO: CUENTA CREAR ---
 # ----------------------
-bancos_disponibles = ["AndBank", "Crèdit Andorrà", "MoraBanc", "Morabanc", "Vallbanc"]
-
-# Logos de bancos de Andorra
-LOGOS_BANCOS = {
-    "AndBank": "https://www.andbank.es/content/dam/andbank/logos/logo-andbank-corporativo.png",
-    "Crèdit Andorrà": "https://www.creditandorragroup.com/wp-content/uploads/2023/09/logo_credit_andorr.png", 
-    "MoraBanc": "https://www.morabanc.ad/sites/default/files/pictures/2024-10/LogoMB_square_2024_0.png",
-    "Morabanc": "https://www.morabanc.ad/sites/default/files/pictures/2024-10/LogoMB_square_2024_0.png",
-    "Vallbanc": "https://www.vallbanc.ad/wp-content/uploads/2023/02/Logo_Vallbanc_600x600.png"
+# =====================
+# CONFIGURACIÓN DE BANCOS
+# =====================
+BANCOS_VALENCIA = {
+    "Banco Sabadell": {
+        "nombre": "Banco Sabadell",
+        "logo": "https://www.bancsabadell.com/cs/Satellite?blobcol=urldata&blobheader=image%2Fpng&blobkey=id&blobtable=MungoBlobs&blobwhere=1317473918946&ssbinary=true",
+        "descripcion": "Banco líder en Valencia con más de 130 años de experiencia"
+    },
+    "CaixaBank": {
+        "nombre": "CaixaBank",
+        "logo": "https://www.caixabank.com/deployedfiles/caixabank_com/Estaticos/Imagenes/infocaixabank/logocaixabank.png",
+        "descripcion": "El banco más grande de España, presente en Valencia"
+    },
+    "Banco Santander": {
+        "nombre": "Banco Santander",
+        "logo": "https://www.santander.com/content/dam/santander-com/logos/banco-santander-logo.png",
+        "descripcion": "Banco internacional con fuerte presencia en la Comunidad Valenciana"
+    },
+    "BBVA": {
+        "nombre": "BBVA",
+        "logo": "https://www.bbva.com/wp-content/uploads/2021/01/BBVA-logo-2019.png",
+        "descripcion": "Banco digital líder en innovación financiera"
+    },
+    "Bankinter": {
+        "nombre": "Bankinter",
+        "logo": "https://www.bankinter.com/www2/logo_bankinter_web.png",
+        "descripcion": "Banco especializado en banca personal y de empresas"
+    }
 }
 
-# Logo por defecto para bancos sin logo específico
-LOGO_BANCO_DEFAULT = "https://cdn.discordapp.com/emojis/881912302932930600.png"  # Emoji de banco genérico
+bancos_disponibles = list(BANCOS_VALENCIA.keys())
 
-@tree.command(name="cuenta-crear", description="Crear cuenta bancaria")
-@app_commands.describe(usuario="Usuario al que crear la cuenta", banco="Banco donde abrir la cuenta")
-@app_commands.choices(banco=[app_commands.Choice(name=b, value=b) for b in bancos_disponibles])
+# Logo por defecto para bancos
+LOGO_BANCO_DEFAULT = "https://cdn.discordapp.com/emojis/881912302932930600.png"
+
+@tree.command(name="cuenta-crear", description="🏦 Crear una nueva cuenta bancaria")
+@app_commands.describe(
+    usuario="Usuario para quien crear la cuenta bancaria",
+    banco="Banco donde abrir la cuenta"
+)
+@app_commands.choices(banco=[app_commands.Choice(name=f"{b} - {BANCOS_VALENCIA[b]['descripcion'][:50]}...", value=b) for b in bancos_disponibles])
 async def cuenta_crear(interaction: Interaction, usuario: discord.Member, banco: app_commands.Choice[str]):
+    """Crea una nueva cuenta bancaria para un usuario"""
+    
+    # Verificar permisos (solo staff puede crear cuentas)
+    if not es_staff(interaction.user):
+        embed = crear_embed_error(
+            "Sin permisos",
+            "Solo el personal autorizado puede crear cuentas bancarias.",
+            config.FOOTER_ADMINISTRATIVO
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    # Validar usuario
+    if not usuario:
+        embed = crear_embed_error(
+            "Usuario inválido",
+            "No se pudo encontrar el usuario especificado.",
+            config.FOOTER_BANCARIO
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
     uid = str(usuario.id)
     
     # Verificar si ya existe cuenta
     if uid in data["cuentas"]:
+        cuenta_existente = data["cuentas"][uid]
         embed = discord.Embed(
-            title="⚠️ Cuenta Ya Existe",
-            description=f"{usuario.mention} ya tiene una cuenta bancaria registrada.",
-            color=discord.Color.orange()
+            title="⚠️ Cuenta ya existente",
+            description=f"**{usuario.display_name}** ya posee una cuenta bancaria activa.",
+            color=config.COLOR_ADVERTENCIA
         )
-        embed.add_field(name="💼 Usuario", value=usuario.mention, inline=True)
-        embed.add_field(name="💡 Sugerencia", value="Usa `/cuenta-ver` para consultar la cuenta existente", inline=False)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.add_field(
+            name="🏦 Banco actual",
+            value=cuenta_existente.get("banco", "No especificado"),
+            inline=True
+        )
+        embed.add_field(
+            name="💳 Saldo en tarjeta",
+            value=f"{cuenta_existente.get('tarjeta', 0):,}€",
+            inline=True
+        )
+        embed.add_field(
+            name="💵 Efectivo",
+            value=f"{cuenta_existente.get('efectivo', 0):,}€",
+            inline=True
+        )
+        embed.add_field(
+            name="💡 Sugerencia",
+            value="Usa `/cuenta-ver` para consultar los detalles completos de la cuenta",
+            inline=False
+        )
+        embed.set_footer(text=config.FOOTER_BANCARIO)
+        embed.set_thumbnail(url=usuario.display_avatar.url)
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
-    # Crear cuenta
-    data["cuentas"][uid] = {
+    # Obtener información del banco seleccionado
+    banco_info = BANCOS_VALENCIA.get(banco.value, {})
+    
+    # Crear cuenta nueva
+    nueva_cuenta = {
         "banco": banco.value,
-        "tarjeta": 1200,   # Saldo inicial en tarjeta
-        "efectivo": 0      # Saldo inicial en efectivo
+        "tarjeta": config.SALDO_INICIAL_TARJETA,
+        "efectivo": config.SALDO_INICIAL_EFECTIVO,
+        "fecha_creacion": datetime.datetime.now().isoformat(),
+        "creado_por": str(interaction.user.id)
     }
+    
+    data["cuentas"][uid] = nueva_cuenta
     save_json("cuentas")
 
-    # Respuesta con embed
+    # Respuesta con embed mejorado
     embed = discord.Embed(
-        title="🏦 Nueva Cuenta Bancaria",
-        description=f"Se ha creado correctamente la cuenta bancaria de {usuario.mention}.",
-        color=discord.Color.green()
+        title="🏦 ¡Cuenta bancaria creada exitosamente!",
+        description=f"Se ha abierto una nueva cuenta bancaria para **{usuario.display_name}**.",
+        color=config.COLOR_EXITO
     )
-    embed.add_field(name="Banco", value=banco.value, inline=False)
-    embed.add_field(name="Saldo en tarjeta", value="1500€", inline=True)
-    embed.add_field(name="Efectivo", value="0€", inline=True)
-    embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+    
+    # Información del banco
+    embed.add_field(
+        name="🏦 Banco seleccionado",
+        value=f"**{banco.value}**\n{banco_info.get('descripcion', 'Banco de confianza en Valencia')}",
+        inline=False
+    )
+    
+    # Saldos iniciales
+    embed.add_field(
+        name="💳 Saldo inicial en tarjeta",
+        value=f"**{config.SALDO_INICIAL_TARJETA:,}€**",
+        inline=True
+    )
+    embed.add_field(
+        name="💵 Efectivo inicial",
+        value=f"**{config.SALDO_INICIAL_EFECTIVO:,}€**",
+        inline=True
+    )
+    embed.add_field(
+        name="📊 Total",
+        value=f"**{config.SALDO_INICIAL_TARJETA + config.SALDO_INICIAL_EFECTIVO:,}€**",
+        inline=True
+    )
+    
+    # Información adicional
+    embed.add_field(
+        name="🔄 Próximos pasos",
+        value="• Usa `/cuenta-ver` para consultar tu cuenta\n• Usa `/dinero-dar` para transferir dinero\n• Usa `/retirar-efectivo` para sacar dinero del banco",
+        inline=False
+    )
+    
+    embed.set_footer(text=f"{config.FOOTER_BANCARIO} • Creada por {interaction.user.display_name}")
+    embed.set_thumbnail(url=banco_info.get('logo', LOGO_BANCO_DEFAULT))
+    embed.set_author(name=usuario.display_name, icon_url=usuario.display_avatar.url)
+    embed.timestamp = discord.utils.utcnow()
 
     await interaction.response.send_message(embed=embed)
 
@@ -171,7 +516,7 @@ async def cuenta_ver(interaction: Interaction, usuario: discord.Member = None):
         )
         embed.add_field(name="💼 Usuario", value=target.mention, inline=True)
         embed.add_field(name="💡 Solución", value="El usuario debe usar `/cuenta-crear` primero", inline=False)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     c = data["cuentas"][uid]
@@ -183,18 +528,16 @@ async def cuenta_ver(interaction: Interaction, usuario: discord.Member = None):
     embed.add_field(name="Efectivo", value=f"{c.get('efectivo',0)}€")
     
     # Agregar logo del banco como thumbnail
-    if banco in LOGOS_BANCOS:
-        embed.set_thumbnail(url=LOGOS_BANCOS[banco])
-    else:
-        # Logo por defecto si no hay logo específico del banco
-        embed.set_thumbnail(url=LOGO_BANCO_DEFAULT)
+    banco_info = BANCOS_VALENCIA.get(banco, {})
+    logo_url = banco_info.get('logo', LOGO_BANCO_DEFAULT)
+    embed.set_thumbnail(url=logo_url)
     
-    embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+    embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
     embed.set_author(name=target.display_name, icon_url=target.display_avatar.url)
     
     await interaction.response.send_message(embed=embed)
 
-@tree.command(name="top", description="Ver ranking de los usuarios más ricos de Andorra RP")
+@tree.command(name="top", description="Ver ranking de los usuarios más ricos de Valencia RP")
 async def top_ricos(interaction: Interaction):
     if not data.get("cuentas"):
         embed = discord.Embed(
@@ -202,7 +545,7 @@ async def top_ricos(interaction: Interaction):
             description="No hay cuentas bancarias registradas en el sistema.",
             color=discord.Color.light_grey()
         )
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
@@ -236,13 +579,13 @@ async def top_ricos(interaction: Interaction):
             description="No hay usuarios válidos con cuentas bancarias.",
             color=discord.Color.light_grey()
         )
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
     # Crear embed con el ranking
     embed = discord.Embed(
-        title="💰 Top Usuarios Más Ricos de Andorra RP",
+        title="💰 Top Usuarios Más Ricos de Valencia RP",
         description="Ranking basado en patrimonio total (tarjeta + efectivo)",
         color=discord.Color.gold()
     )
@@ -287,7 +630,7 @@ async def top_ricos(interaction: Interaction):
         inline=False
     )
     
-    embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+    embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
     embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
     embed.timestamp = discord.utils.utcnow()
     
@@ -304,7 +647,7 @@ async def cuenta_eliminar(interaction: Interaction, usuario: discord.Member):
             color=discord.Color.red()
         )
         embed.add_field(name="⚖️ Requerido", value="Permisos de Staff/Admin", inline=True)
-        embed.set_footer(text="Sistema Administrativo • Andorra RP ESP")
+        embed.set_footer(text="Sistema Administrativo • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
@@ -319,7 +662,7 @@ async def cuenta_eliminar(interaction: Interaction, usuario: discord.Member):
         )
         embed.add_field(name="👤 Usuario", value=usuario.mention, inline=True)
         embed.add_field(name="📋 Estado", value="Sin cuenta bancaria", inline=True)
-        embed.set_footer(text="Sistema Administrativo • Andorra RP ESP")
+        embed.set_footer(text="Sistema Administrativo • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
@@ -376,7 +719,7 @@ async def cuenta_eliminar(interaction: Interaction, usuario: discord.Member):
             inline=False
         )
     
-    embed.set_footer(text="Sistema Administrativo • Andorra RP ESP")
+    embed.set_footer(text="Sistema Administrativo • Valencia RP ESP")
     embed.set_author(name=f"Eliminación de Cuenta", icon_url=interaction.user.display_avatar.url)
     embed.set_thumbnail(url=usuario.display_avatar.url)
     embed.timestamp = discord.utils.utcnow()
@@ -396,7 +739,7 @@ async def dinero_dar(interaction: Interaction, usuario: discord.Member, cantidad
             description="La cantidad debe ser mayor que 0.",
             color=discord.Color.red()
         )
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     pid = str(interaction.user.id); tid = str(usuario.id)
     if pid not in data["cuentas"] or data["cuentas"][pid]["tarjeta"] < cantidad:
@@ -407,7 +750,7 @@ async def dinero_dar(interaction: Interaction, usuario: discord.Member, cantidad
         saldo_actual = data["cuentas"].get(pid, {}).get("tarjeta", 0)
         embed.add_field(name="💳 Tu Saldo", value=f"{saldo_actual}€", inline=True)
         embed.add_field(name="💰 Requerido", value=f"{cantidad}€", inline=True)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     # Verificar que el usuario destinatario tenga cuenta
     if tid not in data["cuentas"]:
@@ -418,7 +761,7 @@ async def dinero_dar(interaction: Interaction, usuario: discord.Member, cantidad
         )
         embed.add_field(name="👤 Usuario", value=usuario.mention, inline=True)
         embed.add_field(name="💡 Solución", value="El usuario debe usar `/cuenta-crear` primero", inline=False)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
@@ -448,7 +791,7 @@ async def dinero_dar(interaction: Interaction, usuario: discord.Member, cantidad
     embed.add_field(name="🔄 Tipo", value=tipo_desc, inline=True)
     embed.add_field(name="📥 Destino", value=destino_desc, inline=True)
     embed.add_field(name="💳 Tu saldo restante", value=f"{data['cuentas'][pid]['tarjeta']}€", inline=True)
-    embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+    embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed)
@@ -468,7 +811,7 @@ async def dinero_agregar(interaction: Interaction, usuario: discord.Member, cant
             color=discord.Color.red()
         )
         embed.add_field(name="⚖️ Requerido", value="Permisos de Staff/Admin", inline=True)
-        embed.set_footer(text="Sistema Administrativo • Andorra RP ESP")
+        embed.set_footer(text="Sistema Administrativo • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
@@ -478,7 +821,7 @@ async def dinero_agregar(interaction: Interaction, usuario: discord.Member, cant
             description="La cantidad debe ser mayor que 0.",
             color=discord.Color.red()
         )
-        embed.set_footer(text="Sistema Administrativo • Andorra RP ESP")
+        embed.set_footer(text="Sistema Administrativo • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
@@ -493,7 +836,7 @@ async def dinero_agregar(interaction: Interaction, usuario: discord.Member, cant
         )
         embed.add_field(name="👤 Usuario", value=usuario.mention, inline=True)
         embed.add_field(name="💡 Solución", value="El usuario debe usar `/cuenta-crear` primero", inline=False)
-        embed.set_footer(text="Sistema Administrativo • Andorra RP ESP")
+        embed.set_footer(text="Sistema Administrativo • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
@@ -523,7 +866,7 @@ async def dinero_agregar(interaction: Interaction, usuario: discord.Member, cant
     embed.add_field(name="💳 Saldo Final", value=f"{saldo_final}€", inline=True)
     embed.add_field(name="🚔 Staff", value=interaction.user.mention, inline=True)
     
-    embed.set_footer(text="Sistema Administrativo • Andorra RP ESP")
+    embed.set_footer(text="Sistema Administrativo • Valencia RP ESP")
     embed.set_author(name=f"Compensación para {usuario.display_name}", icon_url=usuario.display_avatar.url)
     embed.set_thumbnail(url=interaction.user.display_avatar.url)
     embed.timestamp = discord.utils.utcnow()
@@ -539,7 +882,7 @@ async def retirar_efectivo(interaction: Interaction, cantidad: int):
             description="La cantidad debe ser mayor que 0.",
             color=discord.Color.red()
         )
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
@@ -553,7 +896,7 @@ async def retirar_efectivo(interaction: Interaction, cantidad: int):
             color=discord.Color.red()
         )
         embed.add_field(name="💡 Solución", value="Usa `/cuenta-crear` para crear tu cuenta", inline=False)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
@@ -567,7 +910,7 @@ async def retirar_efectivo(interaction: Interaction, cantidad: int):
         )
         embed.add_field(name="💳 Tu Saldo", value=f"{saldo_actual}€", inline=True)
         embed.add_field(name="📤 Solicitado", value=f"{cantidad}€", inline=True)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
@@ -586,7 +929,7 @@ async def retirar_efectivo(interaction: Interaction, cantidad: int):
     embed.add_field(name="💳 Saldo en Tarjeta", value=f"{cuenta['tarjeta']}€", inline=True)
     embed.add_field(name="💵 Efectivo", value=f"{cuenta['efectivo']}€", inline=True)
     embed.add_field(name="🏦 Banco", value=cuenta.get("banco", "N/A"), inline=True)
-    embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+    embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed)
@@ -606,7 +949,7 @@ async def cobrar_sueldo(interaction: Interaction):
             color=discord.Color.red()
         )
         embed.add_field(name="💡 Solución", value="Usa `/cuenta-crear` para crear tu cuenta", inline=False)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
@@ -662,7 +1005,7 @@ async def cobrar_sueldo(interaction: Interaction):
     embed.add_field(name="💸 Impuestos descontados", value=f"{impuestos}€", inline=True)
     embed.add_field(name="💰 Sueldo neto", value=f"{sueldo_neto}€", inline=True)
     embed.add_field(name="⏳ Estado", value="Ingresando a la cuenta...", inline=False)
-    embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+    embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
 
     await interaction.followup.send(embed=embed)
@@ -672,10 +1015,10 @@ async def cobrar_sueldo(interaction: Interaction):
     @tree.command(name="opos-pasadas", description="Registrar oposición pasada - Sistema de formación")
     @app_commands.describe(usuario="Usuario que superó la oposición", instructor="Instructor que impartió la formación", corporacion="Corporación que realiza la formación")
     @app_commands.choices(corporacion=[
-        app_commands.Choice(name="Policia Local D'Andorra", value="policia_local"),
+        app_commands.Choice(name="Policía Local de Valencia", value="policia_local"),
         app_commands.Choice(name="SUM (Servei Urgent Mèdic)", value="sum"),
-        app_commands.Choice(name="Bombers D'Andorra", value="bombers"),
-        app_commands.Choice(name="Andorra Assistència", value="assistencia")
+        app_commands.Choice(name="Bomberos de Valencia", value="bombers"),
+        app_commands.Choice(name="Emergencias Valencia", value="assistencia")
     ])
     async def opos_pasadas(interaction: Interaction, usuario: discord.Member, instructor: discord.Member, corporacion: app_commands.Choice[str]):
         # Asegurar que existe el sistema de oposiciones
@@ -687,10 +1030,10 @@ async def cobrar_sueldo(interaction: Interaction):
             data["oposiciones"][uid] = []
 
         corp_nombre = {
-            "policia_local": "Policia Local D'Andorra",
+            "policia_local": "Policía Local de Valencia",
             "sum": "SUM (Servei Urgent Mèdic)",
-            "bombers": "Bombers D'Andorra",
-            "assistencia": "Andorra Assistència"
+            "bombers": "Bomberos de Valencia",
+            "assistencia": "Emergencias Valencia"
         }
 
         # Generar código único de formación
@@ -712,11 +1055,11 @@ async def cobrar_sueldo(interaction: Interaction):
 
         embed = discord.Embed(
             title="OPOSICIONES {corp_nombre[corporacion.value]}",
-            description=f"Andorra RP | ER:LC OPOSICIONES {corp_nombre[corporacion.value]}\n¡Felicidades {usuario.mention}! Has pasado las oposiciones de {corp_nombre[corporacion.value]} junto al instructor {instructor.mention}.",
+            description=f"Valencia RP | ER:LC OPOSICIONES {corp_nombre[corporacion.value]}\n¡Felicidades {usuario.mention}! Has pasado las oposiciones de {corp_nombre[corporacion.value]} junto al instructor {instructor.mention}.",
             color=discord.Color.green()
         )
-        embed.set_author(name="Andorra RP ESP | ER:LC")
-        embed.set_footer(text=f"BOT Andorra RP APP — {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}")
+        embed.set_author(name="Valencia RP ESP | ER:LC")
+        embed.set_footer(text=f"BOT Valencia RP APP — {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}")
         await interaction.response.send_message(embed=embed)
 
 
@@ -734,7 +1077,7 @@ async def pedir_prestamo(interaction: Interaction, cantidad: int, meses: int):
             color=discord.Color.red()
         )
         embed.add_field(name="💡 Solución", value="Usa `/cuenta-crear` para crear tu cuenta primero", inline=False)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     if cantidad <= 0 or meses <= 0:
         embed = discord.Embed(
@@ -744,7 +1087,7 @@ async def pedir_prestamo(interaction: Interaction, cantidad: int, meses: int):
         )
         embed.add_field(name="💰 Cantidad Mínima", value="1€", inline=True)
         embed.add_field(name="🗺️ Meses Mínimos", value="1 mes", inline=True)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     # si existe préstamo activo con restante > 0
     if uid in data["prestamos"] and data["prestamos"][uid].get("restante",0) > 0:
@@ -756,7 +1099,7 @@ async def pedir_prestamo(interaction: Interaction, cantidad: int, meses: int):
         restante = data["prestamos"][uid].get("restante", 0)
         embed.add_field(name="💰 Monto Restante", value=f"{restante}€", inline=True)
         embed.add_field(name="💡 Acción", value="Usa `/pagar-prestamo` para pagar", inline=True)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     fecha = datetime.date.today().isoformat()
     total_dias = meses * 30
@@ -783,7 +1126,7 @@ async def pedir_prestamo(interaction: Interaction, cantidad: int, meses: int):
     embed.add_field(name="📅 Plazo", value=f"{meses} meses", inline=True)
     embed.add_field(name="📊 Cuota diaria aprox.", value=f"{cuota_diaria}€", inline=True)
     embed.add_field(name="💳 Saldo actual", value=f"{data['cuentas'][uid]['tarjeta']}€", inline=False)
-    embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+    embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed)
@@ -799,7 +1142,7 @@ async def pagar_prestamo(interaction: Interaction, cantidad: int):
             color=discord.Color.red()
         )
         embed.add_field(name="💡 Alternativa", value="Puedes solicitar un préstamo con `/pedir-prestamo`", inline=False)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     if uid not in data["cuentas"] or data["cuentas"][uid]["tarjeta"] < cantidad:
         embed = discord.Embed(
@@ -810,7 +1153,7 @@ async def pagar_prestamo(interaction: Interaction, cantidad: int):
         saldo_actual = data["cuentas"].get(uid, {}).get("tarjeta", 0)
         embed.add_field(name="💳 Tu Saldo", value=f"{saldo_actual}€", inline=True)
         embed.add_field(name="💰 Necesario", value=f"{cantidad}€", inline=True)
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     
     # Realizar el pago
@@ -835,7 +1178,7 @@ async def pagar_prestamo(interaction: Interaction, cantidad: int):
     if restante == 0:
         embed_publico.add_field(name="🎉 Estado", value="**¡PRÉSTAMO LIQUIDADO!**", inline=False)
         embed_publico.color = discord.Color.green()
-    embed_publico.set_footer(text="Sistema Bancario • Andorra RP ESP")
+    embed_publico.set_footer(text="Sistema Bancario • Valencia RP ESP")
     embed_publico.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed_publico)
@@ -854,7 +1197,7 @@ async def pagar_prestamo(interaction: Interaction, cantidad: int):
             if restante == 0:
                 embed.add_field(name="🎉 Estado", value="**¡PRÉSTAMO LIQUIDADO!**", inline=False)
                 embed.color = discord.Color.green()
-            embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+            embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
             embed.timestamp = discord.utils.utcnow()
             
             await user.send(embed=embed)
@@ -872,7 +1215,7 @@ async def prestamos_ver(interaction: Interaction):
             description="No tienes préstamos pendientes actualmente.",
             color=discord.Color.green()
         )
-        embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+        embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     
     # Calcular progreso
@@ -892,7 +1235,7 @@ async def prestamos_ver(interaction: Interaction):
     embed.add_field(name="📅 Fecha Inicio", value=p.get("fecha", "N/A"), inline=True)
     embed.add_field(name="💵 Cuota Diaria", value=f"≈ {p.get('cuota_diaria', 0)}€", inline=True)
     embed.add_field(name="📈 Progreso", value=f"{porcentaje:.1f}%", inline=True)
-    embed.set_footer(text="Sistema Bancario • Andorra RP ESP")
+    embed.set_footer(text="Sistema Bancario • Valencia RP ESP")
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed)
@@ -934,7 +1277,7 @@ async def pagos_prestamos_diarios():
                         if p['restante'] == 0:
                             embed_md.add_field(name="🎉 ¡Préstamo Completado!", value="Has liquidado completamente tu préstamo.", inline=False)
                             embed_md.color = discord.Color.green()
-                        embed_md.set_footer(text="Sistema Bancario Automático • Andorra RP ESP")
+                        embed_md.set_footer(text="Sistema Bancario Automático • Valencia RP ESP")
                         embed_md.timestamp = discord.utils.utcnow()
                         
                         await user.send(embed=embed_md)
@@ -961,7 +1304,7 @@ async def inventario(interaction: Interaction):
             description="Tu inventario está vacío. ¡Compra objetos en la tienda o comercia con otros jugadores!",
             color=discord.Color.light_grey()
         )
-        embed.set_footer(text="Sistema de Inventario • Andorra RP ESP")
+        embed.set_footer(text="Sistema de Inventario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     
     # Contar total de items
@@ -987,7 +1330,7 @@ async def inventario(interaction: Interaction):
             inline=True
         )
     
-    embed.set_footer(text="Sistema de Inventario • Andorra RP ESP")
+    embed.set_footer(text="Sistema de Inventario • Valencia RP ESP")
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed)
@@ -1004,7 +1347,7 @@ async def mirar_inventario(interaction: Interaction, usuario: discord.Member):
             description=f"{usuario.mention} no tiene objetos en su inventario.",
             color=discord.Color.light_grey()
         )
-        embed.set_footer(text="Sistema de Inventario • Andorra RP ESP")
+        embed.set_footer(text="Sistema de Inventario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     
     # Contar total de items
@@ -1030,7 +1373,7 @@ async def mirar_inventario(interaction: Interaction, usuario: discord.Member):
             inline=True
         )
     
-    embed.set_footer(text="Sistema de Inventario • Andorra RP ESP")
+    embed.set_footer(text="Sistema de Inventario • Valencia RP ESP")
     embed.set_thumbnail(url=usuario.display_avatar.url)
     
     await interaction.response.send_message(embed=embed)
@@ -1044,7 +1387,7 @@ async def entregar_objeto(interaction: Interaction, usuario: discord.Member, obj
             description="La cantidad debe ser mayor que 0.",
             color=discord.Color.red()
         )
-        embed.set_footer(text="Sistema de Inventario • Andorra RP ESP")
+        embed.set_footer(text="Sistema de Inventario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     uid = str(interaction.user.id); tid = str(usuario.id)
     inv = data["inventario"].get(uid, {})
@@ -1057,7 +1400,7 @@ async def entregar_objeto(interaction: Interaction, usuario: discord.Member, obj
         tengo = inv.get(objeto, 0)
         embed.add_field(name="📦 Tienes", value=f"{tengo} {objeto}", inline=True)
         embed.add_field(name="📤 Necesitas", value=f"{cantidad} {objeto}", inline=True)
-        embed.set_footer(text="Sistema de Inventario • Andorra RP ESP")
+        embed.set_footer(text="Sistema de Inventario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     inv[objeto] -= cantidad
     if inv[objeto] <= 0:
@@ -1077,7 +1420,7 @@ async def entregar_objeto(interaction: Interaction, usuario: discord.Member, obj
     embed.add_field(name="📦 Objeto", value=objeto, inline=True)
     embed.add_field(name="🔢 Cantidad", value=f"{cantidad}x", inline=True)
     embed.add_field(name="👤 Destinatario", value=usuario.mention, inline=True)
-    embed.set_footer(text="Sistema de Inventario • Andorra RP ESP")
+    embed.set_footer(text="Sistema de Inventario • Valencia RP ESP")
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed)
@@ -1095,7 +1438,7 @@ async def robar_inventario(interaction: Interaction, usuario: discord.Member, ob
         )
         embed.add_field(name="🔎 Objetivo", value=usuario.mention, inline=True)
         embed.add_field(name="📦 Objeto Buscado", value=objeto, inline=True)
-        embed.set_footer(text="Sistema de Inventario • Andorra RP ESP")
+        embed.set_footer(text="Sistema de Inventario • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     # probabilidad simple
     if random.random() < 0.5:
@@ -1117,7 +1460,7 @@ async def robar_inventario(interaction: Interaction, usuario: discord.Member, ob
         embed.add_field(name="🎯 Objetivo", value=usuario.mention, inline=True)
         embed.add_field(name="📦 Objeto Robado", value=objeto, inline=True)
         embed.add_field(name="🍀 Suerte", value="¡Éxito!", inline=True)
-        embed.set_footer(text="Sistema de Inventario • Andorra RP ESP")
+        embed.set_footer(text="Sistema de Inventario • Valencia RP ESP")
         embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
         
         await interaction.response.send_message(embed=embed, ephemeral=False)
@@ -1131,7 +1474,7 @@ async def robar_inventario(interaction: Interaction, usuario: discord.Member, ob
         embed.add_field(name="🎯 Objetivo", value=usuario.mention, inline=True)
         embed.add_field(name="📦 Objeto", value=objeto, inline=True)
         embed.add_field(name="💔 Resultado", value="Fallido", inline=True)
-        embed.set_footer(text="Sistema de Inventario • Andorra RP ESP")
+        embed.set_footer(text="Sistema de Inventario • Valencia RP ESP")
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -1175,7 +1518,7 @@ async def tienda(interaction: Interaction):
         value="Usa `/comprar-objeto` seguido del nombre exacto del objeto",
         inline=False
     )
-    embed.set_footer(text="Sistema de Tienda • Andorra RP ESP")
+    embed.set_footer(text="Sistema de Tienda • Valencia RP ESP")
     
     await interaction.response.send_message(embed=embed)
 
@@ -1189,7 +1532,7 @@ async def comprar_objeto(interaction: Interaction, objeto: str):
             color=discord.Color.red()
         )
         embed.add_field(name="💡 Sugerencia", value="Usa `/tienda` para ver todos los productos disponibles.", inline=False)
-        embed.set_footer(text="Sistema de Tienda • Andorra RP ESP")
+        embed.set_footer(text="Sistema de Tienda • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     precio = TIENDA[objeto]
     uid = str(interaction.user.id)
@@ -1203,7 +1546,7 @@ async def comprar_objeto(interaction: Interaction, objeto: str):
         embed.add_field(name="💳 Tu Saldo", value=f"{saldo_actual}€", inline=True)
         embed.add_field(name="💰 Precio", value=f"{precio}€", inline=True)
         embed.add_field(name="📦 Objeto", value=objeto, inline=True)
-        embed.set_footer(text="Sistema de Tienda • Andorra RP ESP")
+        embed.set_footer(text="Sistema de Tienda • Valencia RP ESP")
         await interaction.response.send_message(embed=embed, ephemeral=True); return
     data["cuentas"][uid]["tarjeta"] -= precio
     inv = data["inventario"].get(uid, {})
@@ -1220,7 +1563,7 @@ async def comprar_objeto(interaction: Interaction, objeto: str):
     embed.add_field(name="🛍️ Objeto", value=objeto, inline=True)
     embed.add_field(name="💰 Precio", value=f"{precio}€", inline=True)
     embed.add_field(name="💳 Saldo restante", value=f"{data['cuentas'][uid]['tarjeta']}€", inline=True)
-    embed.set_footer(text="Sistema de Tienda • Andorra RP ESP")
+    embed.set_footer(text="Sistema de Tienda • Valencia RP ESP")
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed)
@@ -1228,7 +1571,7 @@ async def comprar_objeto(interaction: Interaction, objeto: str):
 # ----------------------
 # Parte 5 — MULTAS, ELIMINAR MULTA, VEHÍCULOS, DOCUMENTACIÓN
 # ----------------------
-# Código Penal Completo de Andorra (Llei 9/2005)
+# Código Penal Completo de Valencia
 CODIGO_PENAL = {
     # Título I: Delitos contra la seguridad del Tránsito
     "1.1": {"descripcion":"Conducción sin permiso","precio":300},
@@ -1283,11 +1626,11 @@ async def multas_poner(interaction: Interaction, usuario: discord.Member, articu
     if ROL_POLICIA_ID not in [r.id for r in interaction.user.roles]:
         embed = discord.Embed(
             title="🚫 Acceso Denegado",
-            description="Este comando solo puede ser usado por la Policía Local D'Andorra.",
+            description="Este comando solo puede ser usado por la Policía Local de Valencia.",
             color=discord.Color.red()
         )
         embed.add_field(name="⚖️ Requerido", value="Rol de Policía", inline=True)
-        embed.set_footer(text="Sistema de Multas • Código Penal de Andorra")
+        embed.set_footer(text="Sistema de Multas • Código Penal de Valencia")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
@@ -1332,7 +1675,7 @@ async def multas_poner(interaction: Interaction, usuario: discord.Member, articu
             inline=False
         )
 
-    embed.set_footer(text="Sistema de Multas • Código Penal de Andorra")
+    embed.set_footer(text="Sistema de Multas • Código Penal de Valencia")
     embed.set_author(name=f"Multa para {usuario.display_name}", icon_url=usuario.display_avatar.url)
     embed.timestamp = discord.utils.utcnow()
 
@@ -1357,7 +1700,7 @@ async def multas_ver(interaction: Interaction, usuario: discord.Member):
         embed.add_field(name="🚗 Vehículo robado", value="Los papeles están en orden", inline=True)
         embed.add_field(name="📄 Licencia", value=("Posee la licencia en orden" if uid in data.get("carnets",{}) else "No posee licencia"), inline=True)
         embed.add_field(name="🛡️ Seguro vehículo", value="Seguro inactivo", inline=True)
-        embed.set_footer(text="Sistema de Consultas • Código Penal de Andorra")
+        embed.set_footer(text="Sistema de Consultas • Código Penal de Valencia")
         await interaction.response.send_message(embed=embed); return
     
     total_all = 0
@@ -1384,7 +1727,7 @@ async def multas_ver(interaction: Interaction, usuario: discord.Member):
     embed.add_field(name="📄 Licencia", value=("✅ Posee licencia" if uid in data.get("carnets",{}) else "❌ Sin licencia"), inline=True)
     embed.add_field(name="🚗 Estado Vehicular", value="En revisión", inline=True)
     
-    embed.set_footer(text="Sistema de Consultas • Código Penal de Andorra")
+    embed.set_footer(text="Sistema de Consultas • Código Penal de Valencia")
     embed.timestamp = discord.utils.utcnow()
     
     await interaction.response.send_message(embed=embed)
@@ -1416,7 +1759,7 @@ async def pagar_multas(interaction: Interaction, codigo: str, cantidad: int):
                 embed.add_field(name="📊 Total de Multa", value=f"{multa['total']}€", inline=True)
                 embed.add_field(name="📅 Fecha de Pago", value=datetime.date.today().strftime("%d/%m/%Y"), inline=True)
                 embed.add_field(name="✅ Estado", value="**LIQUIDADA**", inline=True)
-                embed.set_footer(text="Sistema de Multas • Código Penal de Andorra")
+                embed.set_footer(text="Sistema de Multas • Código Penal de Valencia")
                 embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
                 embed.timestamp = discord.utils.utcnow()
                 
@@ -1443,7 +1786,7 @@ async def multas_eliminar(interaction: Interaction, usuario: discord.Member, cod
             embed.add_field(name="📄 Código", value=codigo, inline=True)
             embed.add_field(name="👤 Usuario", value=usuario.mention, inline=True)
             embed.add_field(name="🚔 Staff", value=interaction.user.mention, inline=True)
-            embed.set_footer(text="Sistema Administrativo • Código Penal de Andorra")
+            embed.set_footer(text="Sistema Administrativo • Código Penal de Valencia")
             embed.set_author(name="Eliminación de Multa", icon_url=interaction.user.display_avatar.url)
             embed.timestamp = discord.utils.utcnow()
             
@@ -1466,7 +1809,7 @@ async def incautar(interaction: Interaction, usuario: discord.Member, matricula:
             color=discord.Color.red()
         )
         embed.add_field(name="⚖️ Requerido", value="Rol de Policía", inline=True)
-        embed.set_footer(text="Sistema de Vehículos • Policía de Andorra")
+        embed.set_footer(text="Sistema de Vehículos • Policía de Valencia")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
@@ -1501,7 +1844,7 @@ async def retirar(interaction: Interaction, usuario: discord.Member, licencia: a
             color=discord.Color.red()
         )
         embed.add_field(name="⚖️ Requerido", value="Rol de Policía", inline=True)
-        embed.set_footer(text="Sistema de Vehículos • Policía de Andorra")
+        embed.set_footer(text="Sistema de Vehículos • Policía de Valencia")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
@@ -1532,7 +1875,7 @@ async def retirar(interaction: Interaction, usuario: discord.Member, licencia: a
 # ----------------------
 @tree.command(name="poner-sancion", description="Imponer sanción a un usuario (SOLO STAFF)")
 @app_commands.describe(usuario="Usuario sancionado", motivo="Motivo", apelable="Apelable (🟩/🟥)", tipo="Tipo (Sancion 1..8)")
-@app_commands.choices(apelable=[app_commands.Choice(name="🟩 Apelable", value="🟩"), app_commands.Choice(name="🟥 No apelable", value="🟥")],
+@app_commands.choices(apelable=[app_commands.Choice(name="🟩", value="🟩"), app_commands.Choice(name="🟥", value="🟥")],
                       tipo=[app_commands.Choice(name=f"Sancion {i}", value=f"Sancion {i}") for i in range(1,9)])
 async def poner_sancion(interaction: Interaction, usuario: discord.Member, motivo: str, apelable: app_commands.Choice[str], tipo: app_commands.Choice[str]):
     if not es_staff(interaction.user):
@@ -1672,11 +2015,7 @@ async def mantenimiento(interaction: Interaction, activar: app_commands.Choice[s
 # ----------------------
 # --- COMANDOS DE DNI ---
 # ----------------------
-# Función para generar un DNI aleatorio
-def generar_dni():
-    numeros = ''.join(random.choices(string.digits, k=8))
-    letra = random.choice(string.ascii_uppercase)
-    return f"{numeros}{letra}"
+# La función generar_dni ya está definida en la sección de utilidades (línea 74)
 
 @tree.command(name="solicitar-dni", description="Solicitar un DNI")
 @app_commands.describe(
@@ -1930,9 +2269,7 @@ async def eliminar_carnet(interaction: Interaction, usuario: discord.Member):
     from discord.ui import View, Button
 
 # Configuración (IDs de canales)
-CANAL_VERIFICACIONES = 1415651594464137246  # Canal donde los usuarios envían la solicitud
-CANAL_SOLICITUDES = 1415652632231677982  # Canal donde el staff revisa solicitudes
-ROL_VERIFICADO = 1416109554629873704  # ID del rol de verificado (cámbialo por el tuyo)
+# Las constantes ahora están centralizadas en la clase Config
 # Embed de solicitud
 def embed_solicitud_verificacion(mensaje: discord.Message) -> discord.Embed:
     embed = discord.Embed(
@@ -1961,7 +2298,7 @@ class ModalRechazo(Modal, title="❌ Rechazar Solicitud"):
         self.usuario = usuario
 
     async def on_submit(self, interaction: discord.Interaction):
-        canal_solicitudes = interaction.guild.get_channel(CANAL_SOLICITUDES)
+        canal_solicitudes = interaction.guild.get_channel(config.CANAL_SOLICITUDES)
 
         # Mensaje público en el canal de solicitudes
         if canal_solicitudes:
@@ -1990,7 +2327,7 @@ class VerificarRechazar(View):
 
     @discord.ui.button(label="✅ Verificar", style=discord.ButtonStyle.green)
     async def verificar(self, interaction: discord.Interaction, button: Button):
-        rol = interaction.guild.get_role(ROL_VERIFICADO)
+        rol = interaction.guild.get_role(config.ROL_VERIFICADO)
         if rol:
             await self.usuario.add_roles(rol, reason="Solicitud de verificación aceptada")
             await interaction.response.send_message(
@@ -2020,74 +2357,18 @@ async def on_message(mensaje: discord.Message):
     if mensaje.author.bot:
         return
 
-    if mensaje.channel.id == CANAL_VERIFICACIONES:
-        canal_solicitudes = bot.get_channel(CANAL_SOLICITUDES)
+    if mensaje.channel.id == config.CANAL_VERIFICACIONES:
+        canal_solicitudes = bot.get_channel(config.CANAL_SOLICITUDES)
         if canal_solicitudes:
             embed = embed_solicitud_verificacion(mensaje)
             await canal_solicitudes.send(embed=embed, view=VerificarRechazar(mensaje.author))
         await mensaje.delete()  # Borra el mensaje original para mantener limpio
 
     await bot.process_commands(mensaje)
-# --- COMANDO SISTEMA DE TICKETS ANDORRA RP ESP ---
-# ----------------------
 
-    @tree.command(name="sistema-tickets", description="Envía el sistema de tickets")
-    async def tickets(interaction: discord.Interaction):
-        log_channel = interaction.guild.get_channel(1415756024102649927)
-
-        class TicketMenu(discord.ui.Select):
-            def __init__(self):
-                options = [
-                    discord.SelectOption(label="Soporte General", description="Ayuda o dudas generales del servidor", emoji="🛠"),
-                    discord.SelectOption(label="Facciones (Legales / Ilegales)", description="Problemas o consultas de cuerpos legales o actividades ilegales", emoji="⚖️"),
-                    discord.SelectOption(label="Alianza", description="Temas relacionados con alianzas entre jugadores o facciones", emoji="🤝"),
-                    discord.SelectOption(label="Otro", description="Cualquier motivo que no encaje en las categorías anteriores", emoji="❓")
-                ]
-                super().__init__(placeholder="Seleccione una opción", options=options)
-
-            async def callback(self, interaction: discord.Interaction):
-                guild = interaction.guild
-                category = discord.utils.get(guild.categories, name="Tickets")
-                if not category:
-                    category = await guild.create_category("Tickets")
-                ticket_channel = await guild.create_text_channel(f"ticket-{interaction.user}-{self.values[0]}", category=category)
-
-                await ticket_channel.set_permissions(interaction.guild.default_role, view_channel=False)
-                await ticket_channel.set_permissions(interaction.user, view_channel=True, send_messages=True)
-                staff_role = guild.get_role(STAFF_ROLE_ID)
-                await ticket_channel.set_permissions(staff_role, view_channel=True, send_messages=True)
-
-                embed_log = discord.Embed(title="• Ticket Ticket creado", description=f"➦ Ticket {ticket_channel.mention} ({ticket_channel.id})\n➦ Panel {self.values[0]}\n➦ Usuario {interaction.user.mention} ({interaction.user.id})", color=discord.Color.green())
-                await log_channel.send(embed=embed_log)
-
-                class CloseTicketButton(discord.ui.View):
-                    def __init__(self):
-                        super().__init__(timeout=None)
-
-                    @discord.ui.button(label="Cerrar ticket", style=discord.ButtonStyle.red, emoji="🔒")
-                    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-                        await interaction.response.send_message("El ticket será cerrado en 10 segundos...")
-                        embed_log = discord.Embed(title="• Ticket Ticket cerrado", description=f"➦ Ticket {interaction.channel.mention} ({interaction.channel.id})\n➦ Panel {self.values[0]}\n➦ Propietario {interaction.user.mention} ({interaction.user.id})\n➦ Razón de cierre No se ha proporcionado una razón", color=discord.Color.red())
-                        await log_channel.send(embed=embed_log)
-                        await asyncio.sleep(10)
-                        embed_log = discord.Embed(title="• Ticket Ticket eliminado", description=f"➦ Ticket {interaction.channel.mention} ({interaction.channel.id})\n➦ Panel {self.values[0]}\n➦ Propietario {interaction.user.mention} ({interaction.user.id})\n➦ Razón de cierre No se ha proporcionado una razón", color=discord.Color.red())
-                        await log_channel.send(embed=embed_log)
-                        await interaction.channel.delete()
-
-                embed = discord.Embed(title="Ticket abierto", description=f"Tipo de ticket: {self.values[0]}\n\nHola {interaction.user.mention}, un miembro del staff estará contigo en breve.\n\n{staff_role.mention}", color=discord.Color.blue())
-                view = CloseTicketButton()
-                await ticket_channel.send(embed=embed, view=view)
-                await interaction.response.send_message(f"Ticket abierto en {ticket_channel.mention}", ephemeral=True)
-
-        class TicketView(discord.ui.View):
-            def __init__(self):
-                super().__init__(timeout=None)
-                self.add_item(TicketMenu())
-
-        embed = discord.Embed(title="✨🎫 Sistema de Tickets – Andorra RP 🎫✨", description="", color=5814783)
-        embed.add_field(name="🛠 Soporte General", value="Abre este ticket si necesitas ayuda o tienes dudas generales del servidor.\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬", inline=False)
-        embed.add_field(name="⚖️ Facciones (Legales / Ilegales)", value="Abre este ticket para problemas o consultas de cuerpos legales como policías, bomberos, o actividades ilegales como bandas o mafias.\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬", inline=False)
-        embed.add_field(name="🤝 Alianza", value="Abre")
+# =====================
+# SISTEMA DE ALERTAS VALENCIA RP  
+# =====================
     
 @bot.tree.command(name="say", description="Hace que el bot diga algo")
 async def say(interaction: discord.Interaction, mensaje: str):
@@ -2102,88 +2383,149 @@ async def say(interaction: discord.Interaction, mensaje: str):
 # ----------------------
 from discord import app_commands, Interaction, Embed
 
-# Colores por tipo de alerta
+# Colores por nivel de alerta (1-5)
 ALERTA_COLORES = {
-    "Alerta Verde": 0x00FF00,
-    "Alerta Amarilla": 0xFFFF00,
-    "Alerta Naranja": 0xFFA500,
-    "Alerta Roja": 0xFF0000,
-    "Alerta Terrorista": 0x8B0000,
-    "Alerta Maxima": 0x4B0082
+    "Nivel 1 - Verde": 0x00FF00,      # Verde
+    "Nivel 2 - Amarillo": 0xFFFF00,  # Amarillo
+    "Nivel 3 - Naranja": 0xFFA500,   # Naranja
+    "Nivel 4 - Rojo": 0xFF0000,      # Rojo
+    "Nivel 5 - Negro": 0x000000      # Negro
 }
 
-# Mensajes muy largos por tipo de alerta
+# Mensajes por nivel de alerta
 ALERTA_MENSAJES = {
-    "Alerta Verde": (
-        "**Alerta Verde:** Todo se encuentra en condiciones normales.\n\n"
-        "Los equipos deben mantener vigilancia estándar y reportar cualquier actividad sospechosa de manera rutinaria. "
-        "No se requiere acción inmediata, pero permanezcan atentos a cualquier novedad. "
-        "Se recomienda revisar regularmente los sistemas de seguridad y mantener comunicación con los superiores. "
-        "Este nivel indica que la situación está controlada y no hay amenazas inmediatas, pero la vigilancia continua es importante."
+    "Nivel 1 - Verde": (
+        "🟢 **NIVEL 1 - ALERTA VERDE**\n\n"
+        "📊 **Estado:** Situación normal y controlada\n"
+        "🔹 **Acción requerida:** Vigilancia estándar\n"
+        "🔹 **Protocolo:** Mantener patrullaje rutinario\n"
+        "🔹 **Comunicación:** Reportes normales cada hora\n\n"
+        "Todo se encuentra en condiciones normales. Mantener vigilancia estándar."
     ),
-    "Alerta Amarilla": (
-        "**Alerta Amarilla:** Se ha detectado un riesgo menor en la zona.\n\n"
-        "Se recomienda extremar precauciones y asegurarse de que todos los protocolos de seguridad estén activos. "
-        "Los miembros deben verificar sus equipos y estar preparados para una posible escalada de la situación. "
-        "La coordinación y comunicación constante es clave para evitar incidentes y garantizar la seguridad de todos."
+    "Nivel 2 - Amarillo": (
+        "🟡 **NIVEL 2 - ALERTA AMARILLA**\n\n"
+        "⚠️ **Estado:** Riesgo menor detectado\n"
+        "🔸 **Acción requerida:** Extremar precauciones\n"
+        "🔸 **Protocolo:** Verificar equipos y sistemas\n"
+        "🔸 **Comunicación:** Reportes cada 30 minutos\n\n"
+        "Se recomienda aumentar la vigilancia y estar preparados."
     ),
-    "Alerta Naranja": (
-        "**Alerta Naranja:** Riesgo elevado detectado.\n\n"
-        "Todos los equipos deben activar protocolos de seguridad avanzados, limitar movimientos innecesarios y reportar cualquier incidencia inmediatamente. "
-        "Se aconseja aumentar la vigilancia, preparar planes de contingencia y estar listos para acciones rápidas. "
-        "La situación es seria, y una respuesta rápida puede prevenir daños o pérdidas significativas."
+    "Nivel 3 - Naranja": (
+        "🟠 **NIVEL 3 - ALERTA NARANJA**\n\n"
+        "🚨 **Estado:** Amenaza moderada confirmada\n"
+        "🔶 **Acción requerida:** Activar protocolos de seguridad\n"
+        "🔶 **Protocolo:** Preparación para intervención\n"
+        "🔶 **Comunicación:** Reportes cada 15 minutos\n\n"
+        "Situación de riesgo que requiere preparación inmediata."
     ),
-    "Alerta Roja": (
-        "**Alerta Roja:** Peligro inminente detectado.\n\n"
-        "Todos los miembros deben estar en máxima alerta y seguir estrictamente los protocolos de emergencia. "
-        "Se requiere preparación para evacuación o intervención inmediata según las instrucciones del equipo de mando. "
-        "Se aconseja que cada miembro revise sus funciones y responsabilidades, y mantenga comunicación constante con el centro de control. "
-        "No se deben tomar riesgos innecesarios; cada acción debe planificarse cuidadosamente para minimizar daños."
+    "Nivel 4 - Rojo": (
+        "🔴 **NIVEL 4 - ALERTA ROJA**\n\n"
+        "🚨 **Estado:** Amenaza grave e inminente\n"
+        "🔻 **Acción requerida:** Despliegue inmediato\n"
+        "🔻 **Protocolo:** Activación de equipos de emergencia\n"
+        "🔻 **Comunicación:** Canal abierto permanente\n\n"
+        "Peligro inmediato. Todos los equipos deben actuar ahora."
     ),
-    "Alerta Terrorista": (
-        "**Alerta Terrorista:** Amenaza de actividad terrorista detectada.\n\n"
-        "Todos los equipos deben actuar con extrema precaución y seguir los protocolos establecidos de seguridad y emergencia. "
-        "Se recomienda reforzar la vigilancia, controlar accesos y reportar cualquier movimiento sospechoso de inmediato. "
-        "La cooperación entre equipos y con las autoridades es esencial. "
-        "Cada acción debe ejecutarse con precisión para prevenir incidentes y garantizar la seguridad de la población."
-    ),
-    "Alerta Maxima": (
-        "**Alerta Máxima:** Situación crítica y de riesgo extremo.\n\n"
-        "Todos los sistemas de seguridad deben estar activados y todos los miembros operativos deben ejecutar los planes de emergencia. "
-        "Se trata de una amenaza de alto nivel, por lo que la cooperación, comunicación y acción rápida son esenciales. "
-        "Se deben seguir estrictamente las órdenes del mando, mantener la disciplina y asegurar que cada área crítica esté protegida. "
-        "El incumplimiento de protocolos puede tener consecuencias graves. Mantengan la calma pero actúen con máxima eficiencia."
+    "Nivel 5 - Negro": (
+        "⚫ **NIVEL 5 - ALERTA NEGRA**\n\n"
+        "💀 **Estado:** CRISIS MÁXIMA - EMERGENCIA TOTAL\n"
+        "⬛ **Acción requerida:** RESPUESTA INMEDIATA Y TOTAL\n"
+        "⬛ **Protocolo:** TODOS LOS RECURSOS DISPONIBLES\n"
+        "⬛ **Comunicación:** PRIORIDAD ABSOLUTA\n\n"
+        "**SITUACIÓN CRÍTICA EXTREMA. MÁXIMA PRIORIDAD.**"
     )
 }
 
-@tree.command(name="alertas", description="Establecer nivel de alerta")
-@app_commands.describe(tipo="Selecciona el tipo de alerta")
-@app_commands.choices(tipo=[
-    app_commands.Choice(name="Alerta Verde", value="Alerta Verde"),
-    app_commands.Choice(name="Alerta Amarilla", value="Alerta Amarilla"),
-    app_commands.Choice(name="Alerta Naranja", value="Alerta Naranja"),
-    app_commands.Choice(name="Alerta Roja", value="Alerta Roja"),
-    app_commands.Choice(name="Alerta Terrorista", value="Alerta Terrorista"),
-    app_commands.Choice(name="Alerta Maxima", value="Alerta Maxima")
+@tree.command(name="alerta", description="🚨 Establecer nivel de alerta de emergencia")
+@app_commands.describe(nivel="Selecciona el nivel de alerta (1-5)")
+@app_commands.choices(nivel=[
+    app_commands.Choice(name="🟢 Nivel 1 - Verde (Normal)", value="Nivel 1 - Verde"),
+    app_commands.Choice(name="🟡 Nivel 2 - Amarillo (Precaución)", value="Nivel 2 - Amarillo"),
+    app_commands.Choice(name="🟠 Nivel 3 - Naranja (Amenaza)", value="Nivel 3 - Naranja"),
+    app_commands.Choice(name="🔴 Nivel 4 - Rojo (Grave)", value="Nivel 4 - Rojo"),
+    app_commands.Choice(name="⚫ Nivel 5 - Negro (Crisis)", value="Nivel 5 - Negro")
 ])
-async def alertas(interaction: Interaction, tipo: app_commands.Choice[str]):
-    color = ALERTA_COLORES.get(tipo.value, 0xFFFFFF)
-    mensaje = ALERTA_MENSAJES.get(tipo.value, "Alerta desconocida.")
-
-    embed_alerta = Embed(
-        title=f"🚨 {tipo.value} 🚨",
+async def alerta(interaction: Interaction, nivel: app_commands.Choice[str]):
+    """Sistema de alertas de emergencia de Valencia RP"""
+    
+    # Verificar permisos (solo staff puede activar alertas)
+    if not es_staff(interaction.user):
+        embed = crear_embed_error(
+            "Sin permisos",
+            "Solo el personal autorizado puede activar alertas de emergencia.",
+            config.FOOTER_POLICIAL
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    # Obtener color y mensaje
+    color = ALERTA_COLORES.get(nivel.value, 0xFFFFFF)
+    mensaje = ALERTA_MENSAJES.get(nivel.value, "Alerta desconocida.")
+    
+    # Crear embed de alerta
+    embed_alerta = discord.Embed(
+        title=f"🚨 SISTEMA DE ALERTAS - VALENCIA RP 🚨",
         description=mensaje,
         color=color
     )
-
+    
+    # Información adicional
+    embed_alerta.add_field(
+        name="👮 Staff responsable",
+        value=interaction.user.mention,
+        inline=True
+    )
+    embed_alerta.add_field(
+        name="📅 Fecha y hora",
+        value=f"<t:{int(time.time())}:F>",
+        inline=True
+    )
+    embed_alerta.add_field(
+        name="📍 Canal",
+        value=interaction.channel.mention,
+        inline=True
+    )
+    
+    embed_alerta.set_footer(text=f"{config.FOOTER_POLICIAL} • Activado por {interaction.user.display_name}")
+    embed_alerta.timestamp = discord.utils.utcnow()
+    
+    # Guardar alerta en el sistema
+    if "alertas" not in data:
+        data["alertas"] = []
+    
+    nueva_alerta = {
+        "nivel": nivel.value,
+        "staff_id": str(interaction.user.id),
+        "staff_name": interaction.user.display_name,
+        "canal_id": str(interaction.channel.id),
+        "fecha": datetime.datetime.now().isoformat(),
+        "timestamp": int(time.time())
+    }
+    
+    data["alertas"].append(nueva_alerta)
+    save_json("alertas")
+    
+    # Responder con la alerta
     await interaction.response.send_message(embed=embed_alerta)
+    
+    # Mensaje adicional para niveles críticos (4 y 5)
+    if "4" in nivel.value or "5" in nivel.value:
+        await interaction.followup.send(
+            f"⚠️ **ATENCIÓN GENERAL** ⚠️\n\n"
+            f"Se ha activado una **{nivel.value.upper()}**\n"
+            f"Todos los equipos deben seguir los protocolos de emergencia.\n\n"
+            f"Staff responsable: {interaction.user.mention}",
+            ephemeral=False
+        )
 
 
 
 # ----------------------
 # --- FIN: INICIO DEL BOT ---
 # ----------------------
-if not TOKEN:
+if not config.TOKEN:
     print("❌ TOKEN no encontrado en variables de entorno (Secrets).")
+    print("Por favor, configura la variable DISCORD_TOKEN en Replit Secrets.")
 else:
-    bot.run(TOKEN)
+    print("🚀 Iniciando Spanish City RP Bot...")
+    bot.run(config.TOKEN)
